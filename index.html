@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Art Gallery VR</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #0a0a0a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+
+        /* Ambient Gallery UI */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+        }
+        #ui-layer h1 {
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        #ui-layer p {
+            font-size: 14px;
+            opacity: 0.7;
+        }
+
+        /* 3D Engine Viewport */
+        #viewport {
+            width: 100%;
+            height: 100%;
+            perspective: 800px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* The 3D Scene container */
+        #scene {
+            width: 1000px;
+            height: 1000px;
+            transform-style: preserve-3d;
+            transition: transform 0.1s ease-out;
+            position: relative;
+        }
+
+        /* Room Structure */
+        .room {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform-style: preserve-3d;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.8s ease-in-out, visibility 0.8s;
+        }
+        .room.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Generic Wall Styles */
+        .wall {
+            position: absolute;
+            width: 1000px;
+            height: 600px;
+            top: 200px;
+            background: #141416;
+            border: 15px solid #1f1f23;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.9), 0 0 50px rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backface-visibility: hidden;
+        }
+
+        /* Elegant Art Framing */
+        .art-frame {
+            width: 75%;
+            height: 75%;
+            background-color: #222;
+            border: 8px solid #fff;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: center;
+            position: relative;
+        }
+
+        .art-frame::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0) 50%);
+            pointer-events: none;
+        }
+
+        /* Positioning walls to form a seamless cube room */
+        .wall.front  { transform: rotateY(  0deg) translateZ(-500px); }
+        .wall.right  { transform: rotateY(-90deg) translateZ(-500px); }
+        .wall.back   { transform: rotateY(180deg) translateZ(-500px); }
+        .wall.left   { transform: rotateY( 90deg) translateZ(-500px); }
+
+        /* Floor Navigation Menu Container */
+        .nav-floor {
+            position: absolute;
+            width: 300px;
+            height: 150px;
+            top: 425px;
+            left: 350px;
+            transform: rotateX(90deg) translateZ(-280px); /* Lays flat on the ground */
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            z-index: 5;
+        }
+
+        .arrow-button {
+            width: 75px;
+            height: 75px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            box-sizing: border-box;
+            box-shadow: 0 0 15px rgba(255,255,255,0.3);
+            cursor: pointer;
+            transition: background 0.3s, transform 0.3s, box-shadow 0.3s;
+            user-select: none;
+        }
+
+        .arrow-button:hover {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(1.1);
+            box-shadow: 0 0 25px rgba(255,255,255,0.8);
+        }
+
+        /* Unique animation context for the next action */
+        .arrow-button.next {
+            animation: pulse 2.5s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 10px rgba(255,255,255,0.2); }
+            50% { box-shadow: 0 0 25px rgba(255,255,255,0.6); }
+            100% { box-shadow: 0 0 10px rgba(255,255,255,0.2); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1 id="room-title">Gallery Room 1</h1>
+        <p>Swipe or Drag to Look Around • Use Floor Arrows to Navigate</p>
+    </div>
+
+    <div id="viewport">
+        <div id="scene">
+            </div>
+    </div>
+
+    <script>
+        const totalRooms = 5;
+        const scene = document.getElementById('scene');
+        const roomTitle = document.getElementById('room-title');
+        
+        let currentRoom = 1;
+        let rotateX = 0;
+        let rotateY = 0;
+        
+        let isPointerDown = false;
+        let prevPointerX = 0;
+        let prevPointerY = 0;
+
+        function buildGallery() {
+            for (let r = 1; r <= totalRooms; r++) {
+                const roomDiv = document.createElement('div');
+                roomDiv.className = `room ${r === 1 ? 'active' : ''}`;
+                roomDiv.id = `room-${r}`;
+
+                // Walls configuration
+                const wallOrientations = ['front', 'right', 'back', 'left'];
+                for (let w = 0; w < 4; w++) {
+                    const wall = document.createElement('div');
+                    wall.className = `wall ${wallOrientations[w]}`;
+
+                    // Standardized naming clean-up across all rooms
+                    let imgName = `room${r}_${w+1}.png`;
+
+                    const frame = document.createElement('div');
+                    frame.className = 'art-frame';
+                    frame.style.backgroundImage = `url('${imgName}')`;
+                    
+                    wall.appendChild(frame);
+                    roomDiv.appendChild(wall);
+                }
+
+                // Double navigation setup layout on floor
+                const navFloor = document.createElement('div');
+                navFloor.className = 'nav-floor';
+                
+                // Back Button (Left Arrow)
+                const btnBack = document.createElement('div');
+                btnBack.className = 'arrow-button back';
+                btnBack.innerHTML = '⮨';
+                btnBack.addEventListener('click', () => changeRoom(-1));
+
+                // Forward Button (Right Arrow)
+                const btnNext = document.createElement('div');
+                btnNext.className = 'arrow-button next';
+                btnNext.innerHTML = '➔';
+                btnNext.addEventListener('click', () => changeRoom(1));
+                
+                navFloor.appendChild(btnBack);
+                navFloor.appendChild(btnNext);
+                roomDiv.appendChild(navFloor);
+                scene.appendChild(roomDiv);
+            }
+        }
+
+        // Generic Directional Room Switcher
+        function changeRoom(direction) {
+            document.getElementById(`room-${currentRoom}`).classList.remove('active');
+            
+            currentRoom += direction;
+            if (currentRoom > totalRooms) currentRoom = 1;
+            if (currentRoom < 1) currentRoom = totalRooms;
+            
+            document.getElementById(`room-${currentRoom}`).classList.add('active');
+            roomTitle.textContent = `Gallery Room ${currentRoom}`;
+            
+            // Snap angles flat smoothly upon loading into a fresh space
+            rotateX = 0;
+            rotateY = 0;
+            updateSceneTransform();
+        }
+
+        function updateSceneTransform() {
+            if (rotateX > 45) rotateX = 45;
+            if (rotateX < -45) rotateX = -45;
+            scene.style.transform = `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+        }
+
+        // Interaction Handling Matrix
+        function pointerStart(x, y) {
+            isPointerDown = true;
+            prevPointerX = x;
+            prevPointerY = y;
+        }
+
+        function pointerMove(x, y) {
+            if (!isPointerDown) return;
+            
+            let deltaX = x - prevPointerX;
+            let deltaY = y - prevPointerY;
+
+            rotateY += deltaX * 0.25; 
+            rotateX -= deltaY * 0.25;
+
+            prevPointerX = x;
+            prevPointerY = y;
+
+            updateSceneTransform();
+        }
+
+        function pointerEnd() {
+            isPointerDown = false;
+        }
+
+        window.addEventListener('mousedown', (e) => pointerStart(e.clientX, e.clientY));
+        window.addEventListener('mousemove', (e) => pointerMove(e.clientX, e.clientY));
+        window.addEventListener('mouseup', pointerEnd);
+
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) pointerStart(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1) pointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        });
+        window.addEventListener('touchend', pointerEnd);
+
+        buildGallery();
+        updateSceneTransform();
+    </script>
+</body>
+</html>
